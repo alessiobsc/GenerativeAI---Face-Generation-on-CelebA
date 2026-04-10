@@ -6,6 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy
+
 from torchvision.datasets import CelebA
 from torchvision.utils import save_image, make_grid
 
@@ -26,7 +27,7 @@ try:
             T.ToDtype(torch.float32, scale=True),  # converte in float 32 e scala i pixel nel range [0,1]
             T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),  # normalizzazione [-1,1] per corenza di scala con tanh
         ])
-except Exception: # fallback per torchvision < 0.15, PROVARE A TOGLIERLO 
+except Exception: # fallback per torchvision < 0.15
     from torchvision import transforms as T
     def build_transform():
         return T.Compose([
@@ -153,7 +154,8 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Flatten(),
-            nn.Dropout(0.1), # dropout per regolarizzazione, non troppo alto per evitare underfitting
+            # PROVARE A RIDURRE A 0.075
+            nn.Dropout(0.075), # dropout per regolarizzazione, non troppo alto per evitare underfitting
                              # essendo che utilizziamo anche la label smoothing e instance noise
             nn.Linear(512 * 4 * 4, 1),
             nn.Sigmoid()
@@ -254,7 +256,7 @@ def main():
 
     dataset = CelebA(
         root=args.data_root,
-        split="train",
+        split="all",
         target_type="attr",
         transform=transform,
         download=args.download
@@ -273,13 +275,14 @@ def main():
     gen = Generator(latent_size=args.latent_size, classes=classes, image_channels=3).to(device)
     disc = Discriminator(classes=classes, image_channels=3).to(device)
 
-    # Inizializzazione pesi seguendo la distribuzione normale 
     gen.apply(weights_init_normal)
     disc.apply(weights_init_normal)
 
     # Ottimizzatori, momentum può portare instabilità in GAN
     # quindi betas=(0.5, 0.999) per ridurre momentum
-    gen_opt = torch.optim.Adam(gen.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    # lr di g dimezzato per cercare di bilanciare l'apprendimento
+    # di g e d
+    gen_opt = torch.optim.Adam(gen.parameters(), lr=(args.lr/2), betas=(0.5, 0.999))
     disc_opt = torch.optim.Adam(disc.parameters(), lr=args.lr, betas=(0.5, 0.999))
 
     start_epoch = 0
@@ -311,7 +314,7 @@ def main():
 
     # instance noise per stabilizzare il training, evitando che D impari troppo velocemente
     # quindi passiamo a D immagini leggermente rumorose
-    start_noise = 0.08
+    start_noise = 0.07
     end_noise = 0.00
 
     for epoch in range(start_epoch, args.epochs):
