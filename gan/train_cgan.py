@@ -154,7 +154,6 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Flatten(),
-            # PROVARE A RIDURRE A 0.075
             nn.Dropout(0.075), # dropout per regolarizzazione, non troppo alto per evitare underfitting
                              # essendo che utilizziamo anche la label smoothing e instance noise
             nn.Linear(512 * 4 * 4, 1),
@@ -280,9 +279,7 @@ def main():
 
     # Ottimizzatori, momentum può portare instabilità in GAN
     # quindi betas=(0.5, 0.999) per ridurre momentum
-    # lr di g dimezzato per cercare di bilanciare l'apprendimento
-    # di g e d
-    gen_opt = torch.optim.Adam(gen.parameters(), lr=(args.lr/2), betas=(0.5, 0.999))
+    gen_opt = torch.optim.Adam(gen.parameters(), lr=args.lr, betas=(0.5, 0.999))
     disc_opt = torch.optim.Adam(disc.parameters(), lr=args.lr, betas=(0.5, 0.999))
 
     start_epoch = 0
