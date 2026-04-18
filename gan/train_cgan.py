@@ -79,35 +79,36 @@ class Generator(nn.Module):
 
         self.e = None  # one-hot eye 
 
-        # Fully connected: (latent+classes) -> 512*4*4 linear output: (B, latent+classes) -> (B, 8192)
+        # Fully connected: (latent+classes) -> 1024*4*4 linear output: (B, latent+classes) -> (B, 8192)
         # la batchnorm cancella il bias del layer precedente
         # e lo sostituisce con il beta appreso, quindi 
         # si può mettere bias=False per il layer precedente
         # in modo da risparmiare memoria e calcoli
-        self.fc = nn.Linear(latent_size + classes, 512 * 4 * 4, bias = False)
+        self.fc = nn.Linear(latent_size + classes, 1024 * 4 * 4, bias = False)
 
         # Upsampling: 4x4 -> 8 -> 16 -> 32 -> 64
         self.net = nn.Sequential(
-            nn.Unflatten(1, (512, 4, 4)), # unflatten della dimensione 1: (B,8192) -> (B,512,4,4) -> Hin = 4
+            nn.Unflatten(1, (1024, 4, 4)), # unflatten della dimensione 1: (B,8192) -> (B,1024,4,4) -> Hin = 4
 
-            nn.BatchNorm2d(512), # batchnorm 2D per immagini uguale al numero di canali in input
+            nn.BatchNorm2d(1024), # batchnorm 2D per immagini uguale al numero di canali in input
             nn.ReLU(True),
 
             # espandiamo la dimensione spaziale con ConvTranspose2d, riducendo i canali (profondità)
             # Hout = (Hin-1)*stride - 2*padding + kernel_size + output_padding
-            nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1, bias = False),  # 8x8
+
+            nn.ConvTranspose2d(1024, 512, 4, stride=2, padding=1, bias = False),  # 8x8
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1, bias = False),  # 16x16
             nn.BatchNorm2d(256), # batchnorm 2D per immagini uguale al numero di canali in output dal layer precedente
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1, bias = False),  # 16x16
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1, bias = False),  # 32x32
             nn.BatchNorm2d(128),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1, bias = False),   # 32x32
-            nn.BatchNorm2d(64),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1, bias = False),    # 64x64
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1, bias = False),   # 64x64
             nn.BatchNorm2d(64),
             nn.ReLU(True),
 
@@ -121,7 +122,7 @@ class Generator(nn.Module):
             self.e = torch.eye(self.classes, device=z.device)
         c = self.e[c]  # one-hot (B,classes)
         zc = torch.cat((z, c), dim=1)  # (B, latent+classes)
-        x = self.fc(zc)               # (B, 512*4*4)
+        x = self.fc(zc)               # (B, 1024*4*4)
         return self.net(x)            # (B,3,64,64) in [-1,1]
 
 
@@ -154,8 +155,8 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Flatten(),
-            nn.Dropout(0.075), # dropout per regolarizzazione, non troppo alto per evitare underfitting
-                             # essendo che utilizziamo anche la label smoothing e instance noise
+            nn.Dropout(0.25), # dropout per regolarizzazione, non troppo alto per evitare underfitting
+                               # essendo che utilizziamo anche la label smoothing e instance noise
             nn.Linear(512 * 4 * 4, 1),
             nn.Sigmoid()
         )
@@ -280,7 +281,7 @@ def main():
     # Ottimizzatori, momentum può portare instabilità in GAN
     # quindi betas=(0.5, 0.999) per ridurre momentum
     gen_opt = torch.optim.Adam(gen.parameters(), lr=args.lr, betas=(0.5, 0.999))
-    disc_opt = torch.optim.Adam(disc.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    disc_opt = torch.optim.Adam(disc.parameters(), lr=args.lr/2, betas=(0.5, 0.999))
 
     start_epoch = 0
     if args.resume:
@@ -311,8 +312,7 @@ def main():
 
     # instance noise per stabilizzare il training, evitando che D impari troppo velocemente
     # quindi passiamo a D immagini leggermente rumorose
-    start_noise = 0.07
-    end_noise = 0.00
+    noise_std = 0.015
 
     for epoch in range(start_epoch, args.epochs):
         
@@ -327,10 +327,6 @@ def main():
         sum_dtrue = 0.0
         sum_dsynth = 0.0
         batches = 0
-
-        # Lineare decay del rumore, diminuisce con il passare delle epoche
-        noise_std = start_noise - (start_noise - end_noise) * (epoch/args.epochs)
-        noise_std = max(end_noise, noise_std)
 
         for i, (x_true, attr) in enumerate(loader):
 

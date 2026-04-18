@@ -1,8 +1,12 @@
-# 🎨 Conditional DDPM – Face Generation on CelebA
+# 🎨 Generative AI — Face Generation on CelebA
+
+> Progetto per il corso di **Generative AI** — generazione condizionata di volti tramite **DDPM** e **CGAN**, addestrati su **CelebA 64×64** con conditioning semantico basato su tre attributi: *Male*, *Smiling*, *Young*.
+
+---
+
+# Conditional DDPM – Face Generation on CelebA
 
 > **Denoising Diffusion Probabilistic Model** condizionato per la generazione di volti, addestrato su **CelebA 64×64** con conditioning semantico basato su tre attributi: *Male*, *Smiling*, *Young*.
-
-Progetto realizzato per il corso di **Generative AI**.
 
 ---
 
@@ -170,3 +174,188 @@ python test_ddpm.py
 - Nichol, A. Q., & Dhariwal, P. (2021). *Improved Denoising Diffusion Probabilistic Models*. ICML 2021.
 - Song, J., Meng, C., & Ermon, S. (2021). *Denoising Diffusion Implicit Models*. ICLR 2021.
 - Ho, J., & Salimans, T. (2022). *Classifier-Free Diffusion Guidance*.
+
+---
+---
+
+# Conditional GAN (CGAN) – Face Generation on CelebA
+
+> **Conditional Generative Adversarial Network** per la generazione di volti 64×64 condizionati sugli stessi tre attributi CelebA: *Male*, *Smiling*, *Young*.
+
+---
+
+## 📌 Descrizione
+
+Il modello implementa una **CGAN** (Conditional GAN) con architettura convoluzionale ispirata a DCGAN, condizionata sulle stesse 8 classi utilizzate dal DDPM. Il generatore produce immagini a partire da un vettore latente `z ~ N(0,1)` di dimensione 128 concatenato alla condizione one-hot, mentre il discriminatore valuta la coerenza tra immagine e condizione mediante injection spaziale della condizione nelle feature map intermedie.
+
+La codifica della classe è identica al DDPM: `class = male × 4 + smiling × 2 + young`.
+
+---
+
+## 🖼️ Risultati
+
+Griglia di generazione condizionata (4 sample per classe, epoch 100):
+
+![CGAN Generation Grid](cgan_generation_grid.png)
+
+---
+
+## 🏗️ Architettura
+
+### Generator
+
+Il generatore segue lo schema DCGAN con upsampling progressivo tramite `ConvTranspose2d`:
+
+```
+z (128) + c (8 one-hot) → Linear → 1024×4×4
+→ ConvT 1024→512  (8×8)   + BN + ReLU
+→ ConvT 512→256   (16×16)  + BN + ReLU
+→ ConvT 256→128   (32×32)  + BN + ReLU
+→ ConvT 128→64    (64×64)  + BN + ReLU
+→ Conv  64→3      (64×64)  + Tanh → output in [-1,1]
+```
+
+Il condizionamento avviene concatenando il vettore one-hot della classe al vettore latente `z` prima del layer fully connected, seguendo il pattern proposto a lezione per le CGAN.
+
+### Discriminator
+
+Il discriminatore utilizza convoluzioni con stride per il downsampling e injection spaziale della condizione:
+
+```
+x (3×64×64)
+→ Conv 3→64    (32×32) + LeakyReLU
+→ Conv 64→128  (16×16) + BN + LeakyReLU
+── injection condizione: c one-hot espanso a (8×16×16) e concatenato sui canali ──
+→ Conv 136→256 (8×8)   + BN + LeakyReLU
+→ Conv 256→512 (4×4)   + BN + LeakyReLU
+→ Flatten → Dropout(0.25) → Linear → Sigmoid
+```
+
+La condizione viene iniettata come mappa spaziale tra `net1` e `net2`: il vettore one-hot viene espanso a 4D con `c[:,:,None,None].expand(-1,-1,16,16)` e concatenato alle feature map sui canali. Questo permette al discriminatore di verificare la coerenza tra condizione e contenuto visivo a livello locale, non solo globale — lo stesso approccio utilizzato dal professore nell'esercizio CGAN su MNIST e nel codice di colorizzazione.
+
+---
+
+## ⚙️ Scelte Progettuali
+
+### Inizializzazione DCGAN
+
+I pesi vengono inizializzati con distribuzioni normali come da paper DCGAN: `N(0, 0.02)` per i layer convoluzionali e lineari, `N(1, 0.02)` per la BatchNorm. Questo riduce il rischio che il discriminatore impari troppo velocemente rispetto al generatore nelle prime epoche.
+
+### Normalizzazione [-1, 1] e Tanh
+
+Le immagini vengono normalizzate nel range `[-1, 1]` tramite `Normalize(0.5, 0.5, 0.5)` e il generatore utilizza `Tanh` come attivazione finale, garantendo coerenza di scala tra dati reali e generati. Questa scelta è preferibile rispetto a `Sigmoid` + `[0,1]` perché centra i dati sullo zero, facilitando il training della BatchNorm.
+
+### Stabilizzazione del Training
+
+Il training delle GAN è intrinsecamente instabile a causa della natura adversariale. Sono state adottate diverse tecniche per bilanciare generatore e discriminatore:
+
+- **Label Smoothing (0.1)**: i target del discriminatore vengono "smussati" (0.9 per i reali, 0.1 per i sintetici) per impedire al discriminatore di imparare una funzione di separazione troppo perfetta, come suggerito a lezione.
+
+- **Instance Noise fisso (σ = 0.015)**: un piccolo rumore gaussiano viene aggiunto alle immagini passate al discriminatore, forzandolo a imparare una funzione meno netta. Questa tecnica è presentata nelle slide come soluzione al problema del vantaggio iniziale del discriminatore. Si è scelto un valore fisso anziché un decay lineare dopo aver osservato sperimentalmente che il decay verso zero causava un crollo delle performance nelle epoche tarde.
+
+- **Learning Rate asimmetrico**: il generatore utilizza `lr = 2e-4` e il discriminatore `lr = 1e-4`. Questo rallenta l'apprendimento del discriminatore, dando al generatore il tempo di migliorare e mantenendo l'equilibrio adversariale.
+
+- **Dropout (0.25)**: applicato nel discriminatore prima del layer lineare finale come ulteriore regolarizzazione.
+
+- **Riduzione del momentum di Adam**: `betas = (0.5, 0.999)` per ridurre l'inerzia dell'ottimizzatore, che può amplificare oscillazioni nel training adversariale.
+
+### Dataset
+
+Si utilizza `split="all"` del dataset CelebA (~200k immagini) anziché il solo training set. Trattandosi di un modello generativo, non è necessario un test set per valutare la generalizzazione: l'obiettivo è modellare la distribuzione `p(x|c)` nel modo più accurato possibile, e più dati vengono utilizzati, migliore è l'approssimazione.
+
+### Training Loop
+
+L'aggiornamento segue l'algoritmo standard presentato a lezione:
+
+1. Generazione di immagini sintetiche con il generatore
+2. Aggiornamento del discriminatore con `detach()` sulle immagini sintetiche (per non propagare gradienti al generatore)
+3. Secondo forward pass attraverso il discriminatore per calcolare la loss del generatore
+4. Aggiornamento del generatore
+
+Questa procedura con doppio forward pass è preferita all'uso di `retain_graph=True` per efficienza di memoria.
+
+### Monitoraggio
+
+Durante il training vengono salvati:
+- **Sample con seed fisso (123)**: per monitorare la convergenza del modello sugli stessi punti dello spazio latente
+- **Sample con seed variabile**: per verificare la diversità e l'assenza di mode collapse
+- **Log CSV** con GLoss, DLoss, Dtrue, Dsynth per ogni epoca
+
+Il checkpoint migliore viene selezionato in base alla qualità visiva dei sample e alla stabilità dell'equilibrio Dtrue/Dsynth, come suggerito dagli appunti: "ci si ferma quando otteniamo risultati soddisfacenti per il generatore".
+
+### Training
+
+| Iperparametro | Valore |
+|:-------------:|:------:|
+| Epoche (checkpoint) | 100 |
+| Batch size | 128 |
+| Learning rate G | 2e-4 |
+| Learning rate D | 1e-4 |
+| Latent size | 128 |
+| Label smoothing | 0.1 |
+| Instance noise | 0.015 (fisso) |
+| Dropout D | 0.25 |
+| Optimizer | Adam (β₁=0.5, β₂=0.999) |
+
+Il training è stato eseguito su **cluster HPC UNISA con Slurm** (partizione `gpuq`), con checkpoint periodici e resume automatico.
+
+---
+
+## 📂 Struttura del Progetto (GAN)
+
+```
+.
+├── train_cgan_G1024.py                        # Training CGAN condizionata
+├── generate.py                                # Generazione griglia di valutazione
+├── cgan_generation_grid_4samples_epoch_100.png  # Risultato generazione condizionata
+└── weights/                                   # Pesi del modello (Google Drive)
+```
+
+### `train_cgan_G1024.py` — Training
+
+Script principale che implementa:
+- **Generator** convoluzionale con 1024 canali iniziali e upsampling progressivo
+- **Discriminator** con injection spaziale della condizione
+- **Training loop** con label smoothing, instance noise, checkpoint/resume, e sample periodici
+
+### `generate.py` — Inferenza e Valutazione
+
+Script dedicato che:
+- Carica un checkpoint addestrato
+- Genera una griglia ordinata di immagini per tutte le 8 combinazioni di attributi
+- Supporta seed personalizzabile per riproducibilità
+- Salva il risultato come immagine PNG
+
+---
+
+## 🚀 Utilizzo (GAN)
+
+### Training
+
+```bash
+python train_cgan_G1024.py \
+  --data_root /path/to/CELEBA \
+  --epochs 100 \
+  --batch_size 128 \
+  --num_workers 6 \
+  --out_dir runs/cgan_celeba
+```
+
+### Generazione
+
+```bash
+python generate.py \
+  --checkpoint weights/cgan_epoch_100.pt \
+  --n_per_class 4 \
+  --seed 123
+```
+
+> ⚠️ Il training richiede una GPU. I pesi del modello sono disponibili su [Google Drive](https://drive.google.com/drive/folders/1tdJAO1E8JK1kDADUIk0fBb5Gs8JH0KlU?usp=drive_link).
+
+---
+
+## 📚 Riferimenti (GAN)
+
+- Goodfellow, I. J. et al. (2014). *Generative Adversarial Networks*. NeurIPS 2014.
+- Radford, A., Metz, L., & Chintala, S. (2015). *Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks* (DCGAN).
+- Mirza, M. & Osindero, S. (2014). *Conditional Generative Adversarial Nets*.
