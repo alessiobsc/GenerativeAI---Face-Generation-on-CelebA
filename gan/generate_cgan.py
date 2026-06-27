@@ -4,7 +4,7 @@ import torch
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from train_cgan_G1024 import Generator
+from train_cgan import Generator
 
 
 @torch.no_grad()
