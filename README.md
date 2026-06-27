@@ -359,3 +359,120 @@ python generate.py \
 - Goodfellow, I. J. et al. (2014). *Generative Adversarial Networks*. NeurIPS 2014.
 - Radford, A., Metz, L., & Chintala, S. (2015). *Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks* (DCGAN).
 - Mirza, M. & Osindero, S. (2014). *Conditional Generative Adversarial Nets*.
+
+
+---
+---
+
+# Conditional VAE (CVAE) – Face Generation on CelebA
+
+> **Conditional Variational Autoencoder** per la generazione di volti 64×64, con iniezione della condizione sia nell'encoder che nello spazio latente per un controllo semantico preciso.
+
+---
+
+## 📌 Descrizione
+
+Questo modello implementa un **CVAE** che mappa le immagini in uno spazio latente di dimensione 128, regolarizzato tramite *Kullback-Leibler Divergence*. L'architettura è in grado di ricostruire volti esistenti o generarne di nuovi a partire da rumore gaussiano, assicurando che i tratti generati rispettino i tre attributi semantici richiesti (*Male*, *Smiling*, *Young*).
+
+A differenza di un VAE standard, la condizione (un vettore a 3 dimensioni) viene iniettata in due punti strategici:
+1.  **Nell'Encoder**: concatenata all'immagine di input, permettendo al modello di apprendere una rappresentazione latente che è già consapevole della condizione.
+2.  **Nel Decoder**: concatenata al vettore latente `z`, guidando il processo di ricostruzione per generare un'immagine coerente con gli attributi specificati.
+
+---
+
+## 🖼️ Risultati
+
+Griglia di generazione condizionata (4 sample per classe, epoch 83):
+
+![CVAE Generation Grid](cvae_generation_grid.png)
+
+---
+
+## 🏗️ Architettura
+
+Il modello `CVAE` è composto da un Encoder e un Decoder interamente convoluzionali:
+
+-   **Encoder**: Riceve in input un'immagine RGB (3 canali) e la condizione (3 canali) espansa spazialmente, per un totale di 6 canali. Utilizza una serie di `Conv2d` con `BatchNorm2d` e `LeakyReLU` per comprimere l'input in una mappa di feature `256x4x4`. Due layer lineari finali generano i parametri della distribuzione latente: media (`mu`) e varianza logaritmica (`logvar`).
+
+-   **Reparameterization Trick**: Campiona un vettore latente `z` dalla distribuzione `N(mu, logvar)` in modo differenziabile.
+
+-   **Decoder**: Riceve il vettore latente `z` (dim 128) concatenato con il vettore delle condizioni `c` (dim 3). Attraverso una serie di `ConvTranspose2d`, `BatchNorm2d` e `LeakyReLU`, esegue l'upsampling fino a generare un'immagine 64×64. L'attivazione finale è `Tanh`, che mappa i pixel nell'intervallo `[-1, 1]`.
+
+---
+
+## ⚙️ Scelte Progettuali
+
+### Filtro Dataset e Normalizzazione Tanh
+Il Dataloader filtra i 40 attributi di CelebA per mantenere solo i 3 richiesti. Le immagini vengono normalizzate nel range `[-1, 1]` per essere compatibili con l'output `Tanh` del generatore, garantendo coerenza di scala e stabilità cromatica.
+
+### Loss Function
+La funzione di costo è una combinazione di due componenti:
+1.  **Reconstruction Loss (BCE)**: Binary Cross Entropy tra l'immagine originale e quella ricostruita, per misurare la fedeltà della ricostruzione.
+2.  **Kullback-Leibler Divergence (KLD)**: Calcolata analiticamente per spingere la distribuzione latente appresa ad assomigliare a una normale standard `N(0, 1)`, garantendo uno spazio latente liscio e continuo.
+
+### Checkpoint Manager
+Per gestire training lunghi su cluster HPC, è stata utilizzata una classe `CheckpointManager` che salva periodicamente (ogni 5 minuti) l'intero stato del training: pesi del modello, stato dell'ottimizzatore e numero di epoca. Questo permette un resume automatico e sicuro in caso di interruzioni, mantenendo solo gli ultimi 3 checkpoint per ottimizzare lo spazio su disco.
+
+### Training
+
+| Iperparametro | Valore |
+|:-------------:|:------:|
+| Epoche | 100 (best checkpoint: 83) |
+| Batch size | 128 |
+| Learning rate | 1e-3 |
+| Optimizer | Adam |
+| Latent dimension (`z`) | 128 |
+| Condition dimension (`c`) | 3 |
+
+---
+
+## 📂 Struttura del Progetto (CVAE)
+
+```text
+.
+├── vae/
+│   ├── train.py                           # Script principale per il training
+│   ├── generate_samples.py                  # Script per generare la griglia di valutazione
+│   ├── test.py                              # Script per test e campionamento casuale
+│   ├── config.py                            # File di configurazione iperparametri
+│   ├── modules/
+│   │   ├── conditional_vae.py               # Architettura PyTorch del CVAE
+│   │   ├── dataset.py                       # Dataloader e gestione attributi
+│   │   ├── loss.py                          # Funzione di costo (BCE + KLD)
+│   │   ├── trainer.py                       # Loop di training con checkpointing
+│   │   └── checkpoint_manager.py            # Utility per salvataggio e resume
+│   └── logs/                                # Log del training
+└── cvae_generation_grid.png                 # Immagine dei risultati
+```
+
+---
+
+## 🚀 Utilizzo (CVAE)
+
+### Training
+
+```bash
+python vae/train.py
+```
+> Lo script utilizza i percorsi e gli iperparametri definiti in `vae/config.py`. Assicurarsi che il dataset CelebA sia disponibile nel percorso specificato.
+
+### Generazione
+
+```bash
+python vae/generate_samples.py
+```
+> Genera una griglia di campioni utilizzando un checkpoint addestrato. Il percorso del checkpoint è configurabile all'interno dello script.
+
+### Testing
+
+```bash
+python vae/test.py
+```
+> Esegue test di ricostruzione sul test set e genera campioni casuali.
+
+---
+
+## 📚 Riferimenti (VAE)
+
+- Kingma, D. P., & Welling, M. (2013). *Auto-Encoding Variational Bayes*.
+- Sohn, K., Lee, H., & Yan, X. (2015). *Learning Structured Output Representation using Deep Conditional Generative Models*.
