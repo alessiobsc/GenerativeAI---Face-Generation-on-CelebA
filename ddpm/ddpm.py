@@ -65,7 +65,7 @@ BATCH_SIZE = 128
 
 P_DROP = 0.2
 
-OUT_DIR = "/home/M.APUZZO13/runs/ddpm_celeba64_ex4style_cosine_500"
+OUT_DIR = "output_dir"
 ensure_dir(OUT_DIR)
 ensure_dir(os.path.join(OUT_DIR, "ckpt"))
 ensure_dir(os.path.join(OUT_DIR, "samples"))

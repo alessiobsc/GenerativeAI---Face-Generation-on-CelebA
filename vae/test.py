@@ -87,7 +87,7 @@ def main():
     # Initialize the model
     model = CVAE(latent_dim=config.LATENT_DIM, num_cond=config.NUM_COND).to(device)
 
-    cpm = CheckpointManager(folder='checkpoints', prefix='cvae_')
+    cpm = CheckpointManager(folder='weights', prefix='cvae_')
     cp = cpm.load_last_checkpoint(map_location=device)
 
     if cp is not None:

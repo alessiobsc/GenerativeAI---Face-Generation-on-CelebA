@@ -16,7 +16,7 @@ def main():
     model = CVAE(input_channel=3, latent_dim=128, num_cond=3).to(device)
 
     # 2. Load trained weights
-    checkpoint_path = "checkpoints/cvae_000083.ckp"
+    checkpoint_path = "weights/cvae_weights_epoch83.ckp"
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path, map_location=device)
         if 'model' in checkpoint:
