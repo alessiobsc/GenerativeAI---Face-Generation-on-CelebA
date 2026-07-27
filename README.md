@@ -350,7 +350,7 @@ python generate.py \
   --seed 123
 ```
 
-> ⚠️ Il training richiede una GPU. I pesi del modello sono disponibili su [Google Drive](https://drive.google.com/drive/folders/1tdJAO1E8JK1kDADUIk0fBb5Gs8JH0KlU?usp=drive_link).
+> ⚠️ Il training richiede una GPU. I pesi del modello sono disponibili su [Google Drive](https://drive.google.com/drive/folders/1YF0rMjRUV6R5EyLJBt2eNkpLvhr3K0rt?usp=drive_link).
 
 ---
 
